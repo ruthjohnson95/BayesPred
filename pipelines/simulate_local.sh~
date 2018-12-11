@@ -18,7 +18,8 @@ then
 fi
 
 # path to folder
-MASTER_PATH=/Users/ruthiejohnson/Development/BayesPred
+#MASTER_PATH=/u/home/r/ruthjohn/ruthjohn/bayesM_noLD/unity_mixture
+MASTER_PATH=/Users/ruthiejohnson/Development/unity_mixture
 SCRIPT_DIR=${MASTER_PATH}/scripts
 SRC_DIR=${MASTER_PATH}/src
 DATA_DIR=${MASTER_PATH}/data
