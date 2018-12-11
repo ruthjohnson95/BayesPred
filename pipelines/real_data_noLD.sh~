@@ -1,0 +1,39 @@
+#!/usr/bin/env sh
+
+
+# select steps of the pipeline 
+STEPS=$1
+
+# default is all steps 
+if [ -z "$STEPS" ]
+then
+	STEPS="1,2,3,4"
+fi 
+
+# path to folder 
+MASTER_PATH=/Users/ruthiejohnson/Development/unity_mixture
+SCRIPT_DIR=${MASTER_PATH}/scripts 
+SRC_DIR=${MASTER_PATH}/src 
+DATA_DIR=${MASTER_PATH}/data 
+
+# simulation params 
+SIM_NAME=test_identity 
+BINS=10
+N=100000
+SEED=2018 # can replace with SGE_TASK_ID
+ITS=10
+
+DATE=`date '+%Y-%m-%d %H:%M:%S'`
+echo $DATE" Starting simulation for unity-mixture: "${SIM_NAME}
+
+# global paths 
+
+# Hoffman paths 
+source /u/local/Modules/default/init/modules.sh
+module load python/2.7
+
+# data will be output to DATA_DIR 
+mkdir -p $DATA_DIR 
+
+python ${SRC_DIR}/mixture_em_noLD.py --name $SIM_NAME --gwas_file $GWAS_FILE --bins $BINS --N $N --seed $SEED --outdir $DATA_DIR  --its $ITS 
+
