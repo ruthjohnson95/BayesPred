@@ -19,11 +19,13 @@ import pandas as pd
 import math
 from scipy.misc import logsumexp as logsumexp
 from sklearn.metrics import r2_score as r2_score
+import cProfile, pstats, StringIO
 
 # global variables
 logging.basicConfig(format='%(asctime)s - %(message)s', datefmt='%d-%b-%y %H:%M:%S', level=logging.INFO)
 EXP_MAX = math.log(sys.float_info.max)
 EXP_MIN = math.log(sys.float_info.min)
+OPT = True
 
 """
     prints both to console and to outfile with file descriptor f
@@ -119,13 +121,13 @@ def compute_q_km(k, m, p_vec, mu_vec, sigma_vec, psi_m, A, gamma_t, C_t, sigma_e
     for k in range(0, K):
         mu_k = mu_vec[k]
         sigma_k = sigma_vec[k]
-        mu_km_vec[k], sigma_km_vec[k] = compute_mu_sigma_km(m, k, mu_k, sigma_k, psi_m, A, gamma_t, C_t, sigma_e, W, beta_tilde)
+        mu_km_vec[k], sigma_km_vec[k] = compute_mu_sigma_km_opt(m, k, mu_k, sigma_k, psi_m, A, gamma_t, C_t, sigma_e, W, beta_tilde)
 
     q_km_vec = compute_km_vec(mu_km_vec, sigma_km_vec, mu_vec, sigma_vec, p_vec)
 
+    q_km_denom = np.sum(q_km_vec)
     for k in range(0, K):
         q_km_num = q_km_vec[k]
-        q_km_denom = np.sum(q_km_vec)
         q_km = q_km_num/q_km_denom
         q_vec[k] = q_km
 
@@ -178,31 +180,30 @@ def compute_mu_sigma_km_opt(m, k, mu_k, sigma_k, psi_m, A, gamma_t, C_t, sigma_e
 
     M = len(beta_tilde)
 
-    # slow way
     W_m = W[:, m]
-    gamma_C_t = np.sum(np.multiply(C_t, gamma_t), axis=1)
 
-    #r_m_1 = np.subtract(beta_tilde, np.matmul(W, gamma_C_t))
-    #r_m_2 = np.multiply(W_m, gamma_t[m, k])
-    #r_m = np.add(r_m_1, r_m_2)
-    #r_m_T = np.transpose(r_m)
+    # zero out last row
+    #C_t[:,3] = np.zeros(M)
+
+    #gamma_C_t = np.sum(np.multiply(C_t, gamma_t), axis=1)
+    gamma_C_t = np.sum(np.multiply(C_t[:,:3], gamma_t[:,:3]), axis=1)
+
+    nonzero_inds = np.nonzero(gamma_C_t)[0]
 
     sum = 0
-    for i in range(0, M):
+    
+    for i in nonzero_inds:
+    #for i in range(0, M):
         a_im = A[i,m]
         if i!=m:
+            # find nonzero element of C_t
+            #ind = np.argmax(C_t[i,:])
+            #sum += a_im * gamma_t[i, ind]
             sum += a_im * gamma_C_t[i]
 
     dp_term = psi_m - sum
 
     mu_km = sigma_km*((mu_k/sigma_k) + ((dp_term)/sigma_e))
-
-    # faster way
-    #term1 = (sigma_km*mu_k)/sigma_k
-    #term2 = sigma_km*sigma_e
-    #dp = dp_term(m, A, gamma_C_t)
-    #term3 = psi_m - dp
-    #mu_km = term1 + term2*term3
 
     return mu_km, sigma_km
 
@@ -241,7 +242,7 @@ def gibbs(p_init, gamma_init, C_init, mu_vec, sigma_vec, sigma_e, W, A, psi, bet
                 # if SNP belongs to mixture K, otherwise effect is 0
                 if C_t[m,k] == 1:
                     # compute posterior mean and variance
-                    mu_km, sigma_km = compute_mu_sigma_km(m, k, mu_vec[k], sigma_vec[k], psi[m], A, gamma_t, C_t, sigma_e, W, beta_tilde)
+                    mu_km, sigma_km = compute_mu_sigma_km_opt(m, k, mu_vec[k], sigma_vec[k], psi[m], A, gamma_t, C_t, sigma_e, W, beta_tilde)
 
                     # sample effect sizes from the posterior
                     gamma_temp[k] = st.norm.rvs(mu_km, sigma_km)
@@ -273,14 +274,18 @@ def gibbs(p_init, gamma_init, C_init, mu_vec, sigma_vec, sigma_e, W, A, psi, bet
         p_list.append(p_t)
 
         gamma_C_t = np.sum(np.multiply(C_t, gamma_t),axis=1)
-        log_like = log_likelihood(beta_tilde, gamma_C_t, sigma_e, W)
+
+        # speedup
+        #log_like = log_likelihood(beta_tilde, gamma_C_t, sigma_e, W)
+        log_like = 0
 
         p_t_string = ""
         for p in p_t:
             p_t_string+=(str(p)+' ')
 
-        print_func("Iteration %d: %s" % (i, p_t_string), f)
-        print_func("Iteration %d (log-like): %4g" % (i, log_like), f)
+        if i%50 == 0:
+            print_func("Iteration %d: %s" % (i, p_t_string), f)
+            #print_func("Iteration %d (log-like): %4g" % (i, log_like), f)
 
 
         # compute weight for iteration
@@ -357,6 +362,7 @@ def main():
     parser.add_option("--precompute", dest="precompute", default='y')
     parser.add_option("--ldsc_h2", dest="ldsc_h2", default=0.50)
     parser.add_option("--its", dest="its", default=500)
+    parser.add_option("--opt", dest="opt", default="y")
     (options, args) = parser.parse_args()
 
     # parse command line args
@@ -368,6 +374,16 @@ def main():
     gwas_file = options.gwas_file
     outdir = options.outdir
     ldsc_h2 = float(options.ldsc_h2)
+
+    # optimze speedup
+    opt = options.opt
+    if opt != 'y':
+        print "NOT using speedup"
+        global OPT
+        OPT = False
+    else:
+        print "Using speedup"
+
 
     # log file
     outfile=os.path.join(outdir, name+'.'+str(seed)+'.BayesPred.log')
@@ -445,7 +461,21 @@ def main():
     # calculate sigma_e
     sigma_e = (1-ldsc_h2)/float(N)
 
+    # start profile
+    pr = cProfile.Profile()
+    pr.enable()
+
     p_est, C_est, weights = gibbs(p_init, gamma_init, C_init, mu_vec, sigma_vec, sigma_e, W, A, psi, beta_tilde, N, its, f)
+
+    # end Profile
+    pr.disable()
+    s = StringIO.StringIO()
+    sortby = 'cumulative'
+    ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+    ps.print_stats()
+    print s.getvalue()
+    print_func(s.getvalue(), f)
+
     print "Estimate: "
     print p_est
 
