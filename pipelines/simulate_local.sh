@@ -35,11 +35,11 @@ SIGMA_G=.50
 MU_VEC="0,0,0,0"
 #SIGMA_VEC="0.01,0.001,0.0001,1e-05,1e-6,1e-10"
 SIGMA_VEC="1e-2,1e-3,1e-4,1e-100"
-M=1000
+M=500
 LD_FILE=${DATA_DIR}/ukbb.${M}.ld
 #COEF=0.9
 #LD_FILE=${DATA_DIR}/simulated_${COEF}.${M}.txt
-N=10000000
+N=500000
 SEED=$SEED # can replace with SGE_TASK_ID
 ITS=5000
 
