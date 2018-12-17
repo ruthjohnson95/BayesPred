@@ -72,7 +72,7 @@ def simulate_mixture(p_vec, mu_vec, sigma_vec, M, sigma_e, V):
     beta_hat = st.multivariate_normal.rvs(mu, cov)
     beta_true = beta
 
-    df = {'BETA_STD': beta_hat, 'BETA_TRUE': beta_true}
+    df = {'BETA_STD': beta_hat, 'BETA_TRUE': beta_true, 'GAMMA_1': beta_k[:,0], 'GAMMA_2':beta_k[:,1], 'GAMMA_3':beta_k[:,2], 'GAMMA_4':beta_k[:,3]}
     beta_hat_df = pd.DataFrame(data=df)
 
     return beta_hat_df

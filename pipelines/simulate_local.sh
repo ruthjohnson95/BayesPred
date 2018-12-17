@@ -26,10 +26,8 @@ DATA_DIR=${MASTER_PATH}/data
 # simulation params
 # simulation params
 SIM_NAME=test_identity
-#P_VEC=".002,.010,0,0,0,.988"
-#P_VEC="0,0.025,0.05,.10,.10,.72"
-#P_VEC="0,0,.3,.3,.3,.10"
-P_VEC="0.005,0.01,0.01,.975"
+P_VEC=".005,.005,.01,.98"
+#P_VEC="0.005,0.01,0.01,.975"
 BINS=4
 SIGMA_G=.50
 MU_VEC="0,0,0,0"
@@ -41,7 +39,7 @@ LD_FILE=${DATA_DIR}/ukbb.${M}.ld
 #LD_FILE=${DATA_DIR}/simulated_${COEF}.${M}.txt
 N=500000
 SEED=$SEED # can replace with SGE_TASK_ID
-ITS=5000
+ITS=500
 
 DATE=`date '+%Y-%m-%d %H:%M:%S'`
 echo $DATE" Starting simulation for unity-mixture: "${SIM_NAME}

@@ -26,6 +26,18 @@ logging.basicConfig(format='%(asctime)s - %(message)s', datefmt='%d-%b-%y %H:%M:
 EXP_MAX = math.log(sys.float_info.max)
 EXP_MIN = math.log(sys.float_info.min)
 OPT = True
+MAX_SNPS_PROP=1.0
+ITS_PROP=.25
+
+
+def gen_var(gamma): # M x 4 vector
+    gamma_sq = np.power(gamma, 2)
+    sum_gamma_sq = np.sum(gamma_sq, axis=0)
+    total_var = np.sum(sum_gamma_sq)
+
+    var_terms = np.divide(sum_gamma_sq, total_var)
+    return var_terms
+
 
 """
     prints both to console and to outfile with file descriptor f
@@ -69,25 +81,6 @@ def compute_km_vec(mu_km_vec, sigma_km_vec, mu_vec, sigma_vec, p_vec):
 
         a_vec[k] = temp_term[0]
         var_vec[k] = var_term[0]
-
-        """
-        #print temp_term
-        if temp_term > EXP_MAX:
-            print "EXP_MAX"
-            #print temp_term
-            #print "sigma_km: %.4g" % sigma_km_vec[k]
-            #print "sigma_k: %.4g" % sigma_k
-            temp_term = EXP_MAX
-        elif temp_term < EXP_MIN:
-            print "EXP_MIN"
-            #print temp_term
-            temp_term = EXP_MIN
-
-        mean_term = np.exp(temp_term)
-
-
-        q_km_vec[k] = p_vec[k]*var_term*mean_term
-        """
 
     # calculate q_km in log form
     log_terms = np.empty(K)
@@ -191,7 +184,7 @@ def compute_mu_sigma_km_opt(m, k, mu_k, sigma_k, psi_m, A, gamma_t, C_t, sigma_e
     nonzero_inds = np.nonzero(gamma_C_t)[0]
 
     sum = 0
-    
+
     for i in nonzero_inds:
     #for i in range(0, M):
         a_im = A[i,m]
@@ -220,6 +213,7 @@ def gibbs(p_init, gamma_init, C_init, mu_vec, sigma_vec, sigma_e, W, A, psi, bet
     # make lists to hold samples
     p_list = []
     C_list = np.empty((M, K))
+    gen_var_list = np.empty(K)
 
     weights = np.zeros(M)
 
@@ -232,6 +226,7 @@ def gibbs(p_init, gamma_init, C_init, mu_vec, sigma_vec, sigma_e, W, A, psi, bet
     # start sampler
     logging.info("Starting sampler")
     for i in range(0, its): # run for iterations
+
         for m in range(0, M): # loop through M SNPs
 
             # temp vector to hold effect size estimates
@@ -292,6 +287,7 @@ def gibbs(p_init, gamma_init, C_init, mu_vec, sigma_vec, sigma_e, W, A, psi, bet
         BURN = its/4
         if i >= BURN:
             weights[:] = np.add(weights, gamma_C_t)
+            gen_var_list[:] = np.add(gen_var_list, gen_var(np.multiply(C_t, gamma_t)))
 
     # end loop
 
@@ -299,7 +295,118 @@ def gibbs(p_init, gamma_init, C_init, mu_vec, sigma_vec, sigma_e, W, A, psi, bet
 
     C_est = np.divide(np.sum(C_t, axis=0), float(M))
 
-    return p_est, C_est, weights
+    return p_est, C_est, weights, gen_var_list
+
+"""
+    500 SNP version of Gibbs sampler function
+"""
+def gibbs_500SNP(p_init, gamma_init, C_init, mu_vec, sigma_vec, sigma_e, W, A, psi, beta_tilde, N, its, f):
+
+    # get metadata
+    K = len(mu_vec)
+    M = len(beta_tilde)
+
+    # make lists to hold samples
+    p_list = []
+    C_list = np.empty((M, K))
+    gen_var_list = np.zeros(K)
+    weights = np.zeros(M)
+
+    # start chain
+    p_t = p_init
+    C_t = C_init
+
+    gamma_t = gamma_init
+
+    # start sampler
+    logging.info("Starting sampler")
+
+    ITS_THESH=its*ITS_PROP
+
+    for i in range(0, its): # run for iterations
+
+        # count how many noncausal SNPs sampled
+        counter = 0
+        SNP_THRESH = M*MAX_SNPS_PROP
+
+        M_list = range(0, M)
+        np.random.shuffle(M_list)
+
+        for m in M_list:
+        #for m in range(0, M): # loop through M SNPs
+            if counter <= SNP_THRESH or i <= ITS_THESH:
+                # temp vector to hold effect size estimates
+                gamma_temp = np.empty(K)
+
+                # sample gamma_t
+                for k in range(0, K): # loop through K mixture components
+                    # if SNP belongs to mixture K, otherwise effect is 0
+                    if C_t[m,k] == 1:
+                        # compute posterior mean and variance
+                        mu_km, sigma_km = compute_mu_sigma_km_opt(m, k, mu_vec[k], sigma_vec[k], psi[m], A, gamma_t, C_t, sigma_e, W, beta_tilde)
+
+                        # sample effect sizes from the posterior
+                        gamma_temp[k] = st.norm.rvs(mu_km, sigma_km)
+                        #gamma_t[m,k] = st.norm.rvs(mu_km, sigma_km)
+                    else:
+                        #gamma_t[m,k] = 0
+                        gamma_temp[k] = 0
+
+                # only update gamma_t after all K mixtures have been sampled
+                gamma_t[m,:] = gamma_temp
+
+                # sample mixture assignments
+                q_km = compute_q_km(k, m, p_t, mu_vec, sigma_vec, psi[m], A, gamma_t, C_t, sigma_e, W, beta_tilde)
+                C  = st.multinomial.rvs(n=1, p=q_km, size=1)
+                C = C.ravel()
+                C_t[m,:] = C
+
+                # check if sampled causal SNP
+                if C_t[m,3] != 1:
+                    counter +=1
+
+                # end loop through K clusters
+            else:
+                # already sampled necessary causal SNPs
+                break
+
+        # end loop through SNPs
+
+        alpha = np.add(np.sum(C_t, axis=0), np.ones(K))
+
+        p_t = st.dirichlet.rvs(alpha)
+        p_t = p_t.ravel()
+        p_list.append(p_t)
+
+        gamma_C_t = np.sum(np.multiply(C_t, gamma_t),axis=1)
+
+        # speedup
+        #log_like = log_likelihood(beta_tilde, gamma_C_t, sigma_e, W)
+        log_like = 0
+
+        p_t_string = ""
+        for p in p_t:
+            p_t_string+=(str(p)+' ')
+
+        if i%50 == 0:
+            print_func("Iteration %d: %s" % (i, p_t_string), f)
+            #print_func("Iteration %d (log-like): %4g" % (i, log_like), f)
+
+
+        # compute weight for iteration
+        BURN = its/4
+        if i >= BURN:
+            weights[:] = np.add(weights, gamma_C_t)
+            gen_var_list[:] = np.add(gen_var_list, gen_var(np.multiply(C_t, gamma_t)))
+
+    # end loop
+
+    p_est = np.mean(p_list[BURN:], axis=0)
+
+    C_est = np.divide(np.sum(C_t, axis=0), float(M))
+
+    return p_est, C_est, weights, gen_var_list
+
 
 
 """
@@ -465,7 +572,7 @@ def main():
     pr = cProfile.Profile()
     pr.enable()
 
-    p_est, C_est, weights = gibbs(p_init, gamma_init, C_init, mu_vec, sigma_vec, sigma_e, W, A, psi, beta_tilde, N, its, f)
+    p_est, C_est, weights, gen_var_list = gibbs_500SNP(p_init, gamma_init, C_init, mu_vec, sigma_vec, sigma_e, W, A, psi, beta_tilde, N, its, f)
 
     # end Profile
     pr.disable()
@@ -485,6 +592,7 @@ def main():
     #print beta_tilde
     BURN = its/4
     weights_est = np.divide(weights, its-BURN)
+    gen_var_est = np.divide(gen_var_list, its-BURN)
 
     weights_true = np.asarray(df['BETA_TRUE'])
     #accuracy = np.corrcoef(weights_true, weights_est)
@@ -494,17 +602,24 @@ def main():
     log_like = log_likelihood(beta_tilde, weights_est, sigma_e, W)
     print_func("Log-like: %.4g" % log_like, f)
 
+    gamma_1 = np.asarray(df['GAMMA_1'])
+    gamma_2 = np.asarray(df['GAMMA_2'])
+    gamma_3 = np.asarray(df['GAMMA_3'])
+    gamma_4 = np.asarray(df['GAMMA_4'])
+
+    true_gamma = np.transpose(np.vstack([gamma_1, gamma_2, gamma_3, gamma_4]))
+    print "True Genetic Var:"
+    gen_var_true = gen_var(true_gamma)
+    print gen_var_true
+
+    print "Est Genetic Var:"
+    print gen_var_est
+
     # save results in data-frames
-    r_df = {'sigma': sigma_vec, 'p': p_est}
+    r_df = {'sigma': sigma_vec, 'p': p_est, 'true_var': gen_var_true, 'est_var': gen_var_est}
     results_df = pd.DataFrame(data=r_df)
     results_file = os.path.join(outdir, name +'.'+str(seed)+'.results')
     results_df.to_csv(results_file, index=False, sep=' ')
-
-    # save estimated effect sizes
-    #df2 = {'weights': weights_est}
-    #weights_df = pd.DataFrame(data=df2)
-    #weights_file = os.path.join(outdir, name +'.'+str(seed)+'.weights')
-    #weights_df.to_csv(weights_file, index=False, sep=' ')
 
     # add weights to the dataframe
     df['WEIGHTS'] = weights_est
